@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebRTC Screen Share v1.9</title>
+    <title>WebRTC Screen Share v2.0</title>
     <style>
         body, html {
             margin: 0;
@@ -87,6 +87,30 @@
             width: auto;
         }
 
+        #resRow {
+            margin-top: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #999;
+        }
+
+        #resRow label {
+            font-family: 'Courier New', monospace;
+        }
+
+        #resSelect {
+            background-color: #444;
+            color: #ddd;
+            border: 1px solid #555;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: 'Courier New', monospace;
+            cursor: pointer;
+        }
+
         #main {
             flex: 1;
             display: flex;
@@ -165,7 +189,7 @@
 </head>
 
 <body>
-    <div id="stats">v1.9</div>
+    <div id="stats">v2.0</div>
 
     <div id="controls">
         <div id="ipLabel"></div>
@@ -179,6 +203,16 @@
             <div id="qrSection">
                 <div id="qrcode"></div>
             </div>
+        </div>
+        <div id="resRow">
+            <label>Resolution</label>
+            <select id="resSelect">
+                <option value="1" selected>Original</option>
+                <option value="1.33">3/4</option>
+                <option value="2">1/2</option>
+                <option value="3">1/3</option>
+                <option value="4">1/4</option>
+            </select>
         </div>
     </div>
 
@@ -364,13 +398,14 @@
 
                     stream.getTracks().forEach(track => {
                         const sender = pc.addTrack(track, stream);
-                        // 降低编码延迟：高码率 + 优先帧率
+                        const scale = parseFloat(document.getElementById('resSelect').value);
                         const params = sender.getParameters();
                         if (!params.encodings || params.encodings.length === 0) {
                             params.encodings = [{}];
                         }
-                        params.encodings[0].maxBitrate = 20000000; // 20Mbps，2K@60fps 需要更高码率
+                        params.encodings[0].maxBitrate = 20000000;
                         params.encodings[0].maxFramerate = 60;
+                        if (scale > 1) params.encodings[0].scaleResolutionDownBy = scale;
                         params.degradationPreference = "maintain-framerate";
                         sender.setParameters(params).catch(() => {});
                     });
@@ -511,11 +546,12 @@
         let lastStatsTime = 0;
         let lastJBDelay = 0;
         let lastJBCount = 0;
+        let lastBytes = 0;
 
         function updateStats() {
             const pc = peerConnections["broadcaster"];
             if (!pc) {
-                statsEl.textContent = "v1.9";
+                statsEl.textContent = "v2.0";
                 setTimeout(updateStats, 1000);
                 return;
             }
@@ -524,17 +560,24 @@
                 let fps = 0;
                 let resolution = '';
                 let delay = '-';
+                let bitrate = '-';
 
                 stats.forEach(report => {
                     if (report.type === 'inbound-rtp' && report.kind === 'video') {
                         const now = report.timestamp;
                         const frames = report.framesDecoded || 0;
+                        const bytes = report.bytesReceived || 0;
                         if (lastStatsTime > 0) {
                             const elapsed = (now - lastStatsTime) / 1000;
-                            if (elapsed > 0) fps = Math.round((frames - lastFrames) / elapsed);
+                            if (elapsed > 0) {
+                                fps = Math.round((frames - lastFrames) / elapsed);
+                                const bps = (bytes - lastBytes) * 8 / elapsed;
+                                bitrate = (bps / 1000000).toFixed(1);
+                            }
                         }
                         lastFrames = frames;
                         lastStatsTime = now;
+                        lastBytes = bytes;
                         if (report.frameWidth && report.frameHeight) {
                             resolution = `${report.frameWidth}x${report.frameHeight}`;
                         }
@@ -557,7 +600,7 @@
                     }
                 });
 
-                statsEl.textContent = `v1.9 | ${fps} FPS | ${resolution} | ${delay}ms`;
+                statsEl.textContent = `v2.0 | ${fps} FPS | ${resolution} | ${bitrate} Mbps | ${delay}ms`;
             }).catch(() => {});
 
             setTimeout(updateStats, 1000);
@@ -568,6 +611,26 @@
         startShareButton.onclick = handleStartSharing;
         watchStreamButton.onclick = handleWatchStream;
         fullscreenButton.onclick = handleFullScreen;
+
+        // 实时切换清晰度
+        document.getElementById('resSelect').onchange = function() {
+            const scale = parseFloat(this.value);
+            addLog(`[RES] Scale changed to ${scale}x`);
+            Object.values(peerConnections).forEach(pc => {
+                pc.getSenders().forEach(sender => {
+                    if (!sender.track || sender.track.kind !== 'video') return;
+                    const params = sender.getParameters();
+                    if (params.encodings && params.encodings.length > 0) {
+                        if (scale > 1) {
+                            params.encodings[0].scaleResolutionDownBy = scale;
+                        } else {
+                            delete params.encodings[0].scaleResolutionDownBy;
+                        }
+                        sender.setParameters(params).catch(() => {});
+                    }
+                });
+            });
+        };
 
         addLog("[INIT] App loaded");
     </script>
