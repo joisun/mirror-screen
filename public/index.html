@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebRTC Screen Share v1.9</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            font-family: Arial, sans-serif;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            background-color: #1a1a1a;
+            color: #fff;
+        }
+
+        #version {
+            position: fixed;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 102, 204, 0.8);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-size: 18px;
+            font-weight: bold;
+            z-index: 2000;
+        }
+
+        #controls {
+            position: fixed;
+            top: 10px;
+            left: 10px;
+            display: flex;
+            gap: 10px;
+            z-index: 2000;
+        }
+
+        #header {
+            background-color: #222;
+            padding: 15px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border-bottom: 1px solid #444;
+        }
+
+        #status {
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        button {
+            background-color: #0066cc;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        button:hover {
+            background-color: #0052a3;
+        }
+
+        #main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background-color: black;
+            position: relative;
+            overflow: hidden;
+        }
+
+        #video {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        #debugPanel {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            right: 10px;
+            width: auto;
+            max-height: 50vh;
+            border: 2px solid #00ff00;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            color: #00ff00;
+            overflow-y: auto;
+            z-index: 1000;
+            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+        }
+
+        .debug-line {
+            margin: 2px 0;
+            word-break: break-all;
+            white-space: pre-wrap;
+        }
+
+        .debug-error {
+            color: #ff4444;
+        }
+
+        .debug-warn {
+            color: #ffaa00;
+        }
+
+        .debug-info {
+            color: #00ff00;
+        }
+
+        #stats {
+            position: fixed;
+            top: 10px;
+            right: 120px;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: #0f0;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            z-index: 2000;
+        }
+
+        #debugToggle {
+            position: fixed;
+            bottom: 10px;
+            right: 10px;
+            background-color: #00ff00;
+            color: #000;
+            padding: 10px 16px;
+            border-radius: 3px;
+            font-weight: bold;
+            z-index: 1001;
+            font-size: 13px;
+        }
+
+        #debugToggle:hover {
+            background-color: #00dd00;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="version">v1.9</div>
+    <div id="stats"></div>
+
+    <div id="controls">
+        <button id="startShare">Share Screen</button>
+        <button id="watchStream">Watch Stream</button>
+        <button id="fullscreen">Fullscreen</button>
+    </div>
+
+    <div id="header">
+        <div id="status">Ready</div>
+    </div>
+
+    <div id="main">
+        <video id="video" autoplay playsinline></video>
+    </div>
+
+    <div id="debugPanel"></div>
+    <button id="debugToggle">Hide Debug</button>
+
+    <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <script>
+        // ============ 配置常量 ============
+        const ENABLE_DEBUG_LOGGING = true;  // 设置为 false 可以关闭屏幕日志显示
+        const ENABLE_FILE_LOGGING = true;   // 设置为 false 可以关闭服务器端文件日志写入
+        const PORT = 3000;
+
+        // ============ 初始化 ============
+        const socket = io();
+        const peerConnections = {};
+        const config = {
+            iceServers: [
+                { urls: "stun:stun.l.google.com:19302" },
+                { urls: "stun:stun1.l.google.com:19302" }
+            ]
+        };
+
+        // DOM elements
+        const videoElement = document.getElementById("video");
+        const startShareButton = document.getElementById("startShare");
+        const watchStreamButton = document.getElementById("watchStream");
+        const fullscreenButton = document.getElementById("fullscreen");
+        const statusElement = document.getElementById("status");
+        const debugPanel = document.getElementById("debugPanel");
+        const debugToggle = document.getElementById("debugToggle");
+
+        // Show debug panel by default
+        debugPanel.style.display = "block";
+
+        // ============ 日志系统 ============
+        const debugLogs = [];
+        const maxLogs = 50;
+
+        function sendLogToServer(message, type) {
+            if (!ENABLE_FILE_LOGGING) return;
+
+            try {
+                socket.emit("clientLog", {
+                    message: message,
+                    type: type,
+                    page: "index",
+                    userAgent: navigator.userAgent,
+                });
+            } catch (e) {
+                // 忽略发送失败
+            }
+        }
+
+        function addLog(message, type = "info") {
+            if (!ENABLE_DEBUG_LOGGING) return;
+
+            const timestamp = new Date().toLocaleTimeString();
+            const log = `[${timestamp}] ${message}`;
+            debugLogs.push({ message: log, type });
+            if (debugLogs.length > maxLogs) debugLogs.shift();
+            updateDebugPanel();
+
+            // 发送到服务器写入文件
+            sendLogToServer(log, type);
+        }
+
+        function updateDebugPanel() {
+            debugPanel.innerHTML = debugLogs
+                .map(log => `<div class="debug-line debug-${log.type}">${log.message}</div>`)
+                .join("");
+            debugPanel.scrollTop = debugPanel.scrollHeight;
+        }
+
+        debugToggle.onclick = () => {
+            if (debugPanel.style.display === "none") {
+                debugPanel.style.display = "block";
+                debugToggle.innerText = "Hide Debug";
+            } else {
+                debugPanel.style.display = "none";
+                debugToggle.innerText = "Show Debug";
+            }
+        };
+
+        // Hijack console
+        const origLog = console.log, origError = console.error, origWarn = console.warn;
+        console.log = (...args) => { addLog(args.join(" "), "info"); origLog(...args); };
+        console.error = (...args) => { addLog(args.join(" "), "error"); origError(...args); };
+        console.warn = (...args) => { addLog(args.join(" "), "warn"); origWarn(...args); };
+
+        // ============ Socket 事件 ============
+        socket.on("connect", () => addLog("[S01] Socket connected"));
+        socket.on("disconnect", () => addLog("[S02] Socket disconnected", "error"));
+        socket.on("error", (err) => addLog(`[S03] Socket error: ${err}`, "error"));
+
+        // ============ SDP 兼容处理（适配旧版 WebView） ============
+        function cleanSDP(sdp) {
+            if (!sdp) return sdp;
+
+            const original = sdp;
+            const lines = sdp.split('\r\n');
+            const cleaned = [];
+
+            for (const line of lines) {
+                if (line === 'a=') continue;
+                if (line.startsWith('a=extmap-allow-mixed')) continue;
+
+                cleaned.push(line);
+            }
+
+            const result = cleaned.join('\r\n');
+            if (result.length !== original.length) {
+                addLog(`[SDP-CLEAN] ${original.length} → ${result.length} chars`);
+            }
+            return result;
+        }
+
+        // ============ 工具函数 ============
+        async function getIP() {
+            try {
+                const res = await fetch("/ip");
+                const data = await res.json();
+                return data.ip;
+            } catch (e) {
+                addLog(`[IP01] Failed to get IP: ${e.message}`, "error");
+                throw e;
+            }
+        }
+
+        // ============ 广播端逻辑 ============
+        async function handleStartSharing() {
+            try {
+                addLog("[B01] Getting display media...");
+                const stream = await navigator.mediaDevices.getDisplayMedia({
+                    video: {
+                        frameRate: { ideal: 60 },
+                        width: { ideal: 2560 },
+                        height: { ideal: 1440 }
+                    }
+                });
+                addLog("[B02] Display media acquired");
+                videoElement.srcObject = stream;
+
+                const ip = await getIP();
+                statusElement.innerText = `Sharing from ${ip}:${PORT}`;
+                addLog(`[B03] Ready to share. Connect to http://${ip}:${PORT}`);
+
+                socket.emit("broadcaster");
+                addLog("[B04] Broadcaster registered");
+
+                socket.on("watcher", (id) => {
+                    addLog(`[B05] Watcher connected: ${id}`);
+                    const pc = new RTCPeerConnection(config);
+                    peerConnections[id] = pc;
+
+                    // Connection state monitoring
+                    pc.onconnectionstatechange = () => {
+                        addLog(`[B06] Connection state: ${pc.connectionState}`);
+                    };
+
+                    pc.oniceconnectionstatechange = () => {
+                        addLog(`[B07] ICE state: ${pc.iceConnectionState}`);
+                    };
+
+                    stream.getTracks().forEach(track => {
+                        const sender = pc.addTrack(track, stream);
+                        // 降低编码延迟：高码率 + 优先帧率
+                        const params = sender.getParameters();
+                        if (!params.encodings || params.encodings.length === 0) {
+                            params.encodings = [{}];
+                        }
+                        params.encodings[0].maxBitrate = 20000000; // 20Mbps，2K@60fps 需要更高码率
+                        params.encodings[0].maxFramerate = 60;
+                        params.degradationPreference = "maintain-framerate";
+                        sender.setParameters(params).catch(() => {});
+                    });
+
+                    pc.onicecandidate = (e) => {
+                        if (e.candidate) {
+                            addLog(`[B08] ICE candidate: ${e.candidate.candidate.substring(0, 80)}`);
+                            socket.emit("candidate", id, e.candidate);
+                        } else {
+                            addLog("[B09] All ICE candidates sent");
+                        }
+                    };
+
+                    pc.createOffer().then(async (offer) => {
+                        await pc.setLocalDescription(offer);
+                        addLog(`[B10] Offer created, type: ${offer.type}`);
+                        socket.emit("offer", id, offer);
+                    }).catch(e => addLog(`[B11] Offer error: ${e.message}`, "error"));
+                });
+
+                socket.on("answer", (id, answer) => {
+                    addLog(`[B12] Answer received from ${id}, type: ${answer.type}`);
+                    if (peerConnections[id]) {
+                        peerConnections[id].setRemoteDescription(answer).catch(e =>
+                            addLog(`[B13] Answer error: ${e.message}`, "error")
+                        );
+                    }
+                });
+
+                socket.on("candidate", (id, candidate) => {
+                    addLog(`[B14] ICE candidate received from ${id}`);
+                    if (peerConnections[id]) {
+                        peerConnections[id].addIceCandidate(new RTCIceCandidate(candidate)).catch(e =>
+                            addLog(`[B15] ICE error: ${e.message}`, "error")
+                        );
+                    }
+                });
+
+                socket.on("clientDisconnected", (id) => {
+                    addLog(`[B16] Watcher disconnected: ${id}`, "warn");
+                    if (peerConnections[id]) {
+                        peerConnections[id].close();
+                        delete peerConnections[id];
+                    }
+                });
+
+            } catch (e) {
+                addLog(`[B99] Sharing error: ${e.message}`, "error");
+                statusElement.innerText = "Error";
+            }
+        }
+
+        // ============ 观看端逻辑 ============
+        function handleWatchStream() {
+            addLog("[W01] Watching stream...");
+            statusElement.innerText = "Connecting...";
+
+            socket.emit("watcher");
+
+            const pc = new RTCPeerConnection(config);
+            peerConnections["broadcaster"] = pc;
+
+            // Connection state monitoring
+            pc.onconnectionstatechange = () => {
+                addLog(`[W02] Connection state: ${pc.connectionState}`);
+            };
+
+            pc.oniceconnectionstatechange = () => {
+                addLog(`[W03] ICE state: ${pc.iceConnectionState}`);
+            };
+
+            pc.onicecandidate = (e) => {
+                if (e.candidate) {
+                    addLog(`[W04] ICE candidate: ${e.candidate.candidate.substring(0, 80)}`);
+                    socket.emit("candidate", "broadcaster", e.candidate);
+                } else {
+                    addLog("[W05] All ICE candidates sent");
+                }
+            };
+
+            pc.ontrack = (e) => {
+                addLog("[W06] Stream received");
+                videoElement.srcObject = e.streams[0];
+                statusElement.innerText = "Playing";
+
+                // 尝试减少 jitter buffer 延迟
+                const receiver = e.receiver;
+                if (receiver && typeof receiver.jitterBufferTarget !== 'undefined') {
+                    receiver.jitterBufferTarget = 0; // 最小化缓冲
+                    addLog("[W06a] jitterBufferTarget set to 0");
+                }
+            };
+
+            socket.on("offer", async (id, offer) => {
+                addLog(`[W07] Offer received from ${id}, type: ${offer.type}`);
+                try {
+                    const cleanedOffer = {
+                        type: offer.type,
+                        sdp: cleanSDP(offer.sdp)
+                    };
+                    await pc.setRemoteDescription(cleanedOffer);
+                    addLog("[W08] Remote description set");
+                    const answer = await pc.createAnswer();
+                    addLog("[W09] Answer created");
+                    await pc.setLocalDescription(answer);
+                    addLog("[W10] Local description set");
+                    socket.emit("answer", id, answer);
+                    addLog("[W11] Answer sent");
+                } catch (e) {
+                    addLog(`[W99] Offer handling error: ${e.message}`, "error");
+                    addLog(`[W99a] Error name: ${e.name}`, "error");
+                    addLog(`[W99b] Error stack: ${e.stack ? e.stack.substring(0, 200) : 'N/A'}`, "error");
+                }
+            });
+
+            socket.on("candidate", (id, candidate) => {
+                addLog(`[W12] ICE candidate received from ${id}`);
+                if (!candidate || !candidate.candidate) {
+                    addLog("[W12a] Empty candidate, skipping");
+                    return;
+                }
+                pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(e =>
+                    addLog(`[W13] ICE error: ${e.message}`, "error")
+                );
+            });
+        }
+
+        // ============ 全屏功能 ============
+        function handleFullScreen() {
+            addLog("[F01] Requesting fullscreen...");
+            if (videoElement.requestFullscreen) {
+                videoElement.requestFullscreen().catch(e => addLog(`[F99] Fullscreen error: ${e}`, "warn"));
+            } else if (videoElement.webkitRequestFullscreen) {
+                videoElement.webkitRequestFullscreen();
+            }
+        }
+
+        // ============ 性能统计 ============
+        const statsEl = document.getElementById("stats");
+        let lastFrames = 0;
+        let lastStatsTime = 0;
+        let lastJBDelay = 0;
+        let lastJBCount = 0;
+
+        function updateStats() {
+            const pc = peerConnections["broadcaster"];
+            if (!pc) {
+                statsEl.textContent = "";
+                setTimeout(updateStats, 1000);
+                return;
+            }
+
+            pc.getStats().then(stats => {
+                let fps = 0;
+                let resolution = '';
+                let delay = '-';
+
+                stats.forEach(report => {
+                    if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                        const now = report.timestamp;
+                        const frames = report.framesDecoded || 0;
+                        if (lastStatsTime > 0) {
+                            const elapsed = (now - lastStatsTime) / 1000;
+                            if (elapsed > 0) fps = Math.round((frames - lastFrames) / elapsed);
+                        }
+                        lastFrames = frames;
+                        lastStatsTime = now;
+                        if (report.frameWidth && report.frameHeight) {
+                            resolution = `${report.frameWidth}x${report.frameHeight}`;
+                        }
+                        // 瞬时 jitter buffer 延迟
+                        if (report.jitterBufferDelay != null && report.jitterBufferEmittedCount != null) {
+                            const dDelay = report.jitterBufferDelay - lastJBDelay;
+                            const dCount = report.jitterBufferEmittedCount - lastJBCount;
+                            if (dCount > 0) delay = Math.round((dDelay / dCount) * 1000);
+                            lastJBDelay = report.jitterBufferDelay;
+                            lastJBCount = report.jitterBufferEmittedCount;
+                        }
+                    }
+                    // 旧版 Chrome
+                    if (report.type === 'ssrc' && report.googFrameRateDecoded) {
+                        fps = parseInt(report.googFrameRateDecoded) || 0;
+                        if (report.googFrameWidthReceived && report.googFrameHeightReceived) {
+                            resolution = `${report.googFrameWidthReceived}x${report.googFrameHeightReceived}`;
+                        }
+                        if (report.googJitterBufferMs) delay = report.googJitterBufferMs;
+                    }
+                });
+
+                statsEl.textContent = `${fps} FPS | ${resolution} | ${delay}ms`;
+            }).catch(() => {});
+
+            setTimeout(updateStats, 1000);
+        }
+        updateStats();
+
+        // ============ 事件绑定 ============
+        startShareButton.onclick = handleStartSharing;
+        watchStreamButton.onclick = handleWatchStream;
+        fullscreenButton.onclick = handleFullScreen;
+
+        addLog("[INIT] App loaded");
+    </script>
+</body>
+</html>
