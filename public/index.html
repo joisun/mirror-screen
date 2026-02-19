@@ -19,55 +19,72 @@
             color: #fff;
         }
 
-        #version {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            background-color: rgba(0, 102, 204, 0.8);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-size: 18px;
-            font-weight: bold;
-            z-index: 2000;
-        }
-
         #controls {
             position: fixed;
-            top: 10px;
-            left: 10px;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
             display: flex;
-            gap: 10px;
-            z-index: 2000;
-        }
-
-        #header {
-            background-color: #222;
-            padding: 15px;
-            display: flex;
-            justify-content: center;
+            flex-direction: column;
             align-items: center;
-            border-bottom: 1px solid #444;
+            z-index: 2000;
+            background-color: rgba(30, 30, 30, 0.9);
+            padding: 16px;
+            border-radius: 12px;
+            border: 1px solid #333;
         }
 
-        #status {
-            font-size: 14px;
-            color: #aaa;
+        #ipLabel {
+            font-size: 13px;
+            color: #999;
+            font-family: 'Courier New', monospace;
+            margin-bottom: 10px;
+            display: none;
+        }
+
+        #controlsRow {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        #btnGrid {
+            display: flex;
+            flex-wrap: wrap;
+            width: 360px;
+        }
+
+        #btnGrid button {
+            width: 172px;
+            margin: 4px;
         }
 
         button {
-            background-color: #0066cc;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 4px;
+            background-color: #444;
+            color: #ddd;
+            border: 1px solid #555;
+            padding: 14px 20px;
+            border-radius: 6px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 16px;
             font-weight: bold;
+            white-space: nowrap;
         }
 
-        button:hover {
-            background-color: #0052a3;
+        button:hover, button:focus {
+            background-color: #666;
+            border-color: #888;
+            color: #fff;
+        }
+
+        #qrSection {
+            display: none;
+        }
+
+        #qrSection img, #qrSection table {
+            display: block;
+            max-height: 100px;
+            width: auto;
         }
 
         #main {
@@ -87,47 +104,39 @@
 
         #debugPanel {
             position: fixed;
-            bottom: 10px;
-            left: 10px;
-            right: 10px;
-            width: auto;
-            max-height: 50vh;
-            border: 2px solid #00ff00;
-            border-radius: 4px;
+            top: 30px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            height: calc(100vh - 30px);
             padding: 10px;
             font-family: 'Courier New', monospace;
-            font-size: 16px;
+            font-size: 14px;
             color: #00ff00;
-            overflow-y: auto;
+            background-color: rgba(0, 0, 0, 0.85);
             z-index: 1000;
-            box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+            column-count: 3;
+            column-gap: 16px;
+            column-fill: auto;
         }
 
         .debug-line {
-            margin: 2px 0;
+            margin: 1px 0;
             word-break: break-all;
             white-space: pre-wrap;
         }
 
-        .debug-error {
-            color: #ff4444;
-        }
-
-        .debug-warn {
-            color: #ffaa00;
-        }
-
-        .debug-info {
-            color: #00ff00;
-        }
+        .debug-error { color: #ff4444; }
+        .debug-warn { color: #ffaa00; }
+        .debug-info { color: #00ff00; }
 
         #stats {
             position: fixed;
-            top: 10px;
-            right: 120px;
+            top: 4px;
+            right: 4px;
             background-color: rgba(0, 0, 0, 0.7);
             color: #0f0;
-            padding: 6px 12px;
+            padding: 4px 8px;
             border-radius: 4px;
             font-family: 'Courier New', monospace;
             font-size: 14px;
@@ -135,36 +144,42 @@
         }
 
         #debugToggle {
-            position: fixed;
-            bottom: 10px;
-            right: 10px;
-            background-color: #00ff00;
-            color: #000;
-            padding: 10px 16px;
-            border-radius: 3px;
-            font-weight: bold;
-            z-index: 1001;
-            font-size: 13px;
+            position: relative;
         }
 
-        #debugToggle:hover {
-            background-color: #00dd00;
+        .debug-dot {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background-color: #555;
+        }
+
+        .debug-dot.on {
+            background-color: #0f0;
+            box-shadow: 0 0 4px #0f0;
         }
     </style>
 </head>
 
 <body>
-    <div id="version">v1.9</div>
-    <div id="stats"></div>
+    <div id="stats">v1.9</div>
 
     <div id="controls">
-        <button id="startShare">Share Screen</button>
-        <button id="watchStream">Watch Stream</button>
-        <button id="fullscreen">Fullscreen</button>
-    </div>
-
-    <div id="header">
-        <div id="status">Ready</div>
+        <div id="ipLabel"></div>
+        <div id="controlsRow">
+            <div id="btnGrid">
+                <button id="startShare">Share Screen</button>
+                <button id="watchStream">Watch Stream</button>
+                <button id="fullscreen">Fullscreen</button>
+                <button id="debugToggle"><span id="debugDot" class="debug-dot"></span>Debug</button>
+            </div>
+            <div id="qrSection">
+                <div id="qrcode"></div>
+            </div>
+        </div>
     </div>
 
     <div id="main">
@@ -172,9 +187,9 @@
     </div>
 
     <div id="debugPanel"></div>
-    <button id="debugToggle">Hide Debug</button>
 
     <script src="https://cdn.socket.io/4.8.1/socket.io.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
     <script>
         // ============ 配置常量 ============
         const ENABLE_DEBUG_LOGGING = true;  // 设置为 false 可以关闭屏幕日志显示
@@ -196,16 +211,16 @@
         const startShareButton = document.getElementById("startShare");
         const watchStreamButton = document.getElementById("watchStream");
         const fullscreenButton = document.getElementById("fullscreen");
-        const statusElement = document.getElementById("status");
         const debugPanel = document.getElementById("debugPanel");
         const debugToggle = document.getElementById("debugToggle");
 
-        // Show debug panel by default
-        debugPanel.style.display = "block";
+        // Debug panel hidden by default
+        debugPanel.style.display = "none";
+        const debugDot = document.getElementById("debugDot");
 
         // ============ 日志系统 ============
         const debugLogs = [];
-        const maxLogs = 50;
+        const maxLogs = 150;
 
         function sendLogToServer(message, type) {
             if (!ENABLE_FILE_LOGGING) return;
@@ -245,10 +260,10 @@
         debugToggle.onclick = () => {
             if (debugPanel.style.display === "none") {
                 debugPanel.style.display = "block";
-                debugToggle.innerText = "Hide Debug";
+                debugDot.classList.add("on");
             } else {
                 debugPanel.style.display = "none";
-                debugToggle.innerText = "Show Debug";
+                debugDot.classList.remove("on");
             }
         };
 
@@ -312,8 +327,23 @@
                 videoElement.srcObject = stream;
 
                 const ip = await getIP();
-                statusElement.innerText = `Sharing from ${ip}:${PORT}`;
-                addLog(`[B03] Ready to share. Connect to http://${ip}:${PORT}`);
+                const url = `http://${ip}:${PORT}`;
+                addLog(`[B03] Ready to share. Connect to ${url}`);
+
+                // 显示 IP 和 QR 码
+                const ipLabel = document.getElementById('ipLabel');
+                ipLabel.textContent = `${ip}:${PORT}`;
+                ipLabel.style.display = 'block';
+
+                try {
+                    var qr = qrcode(0, 'M');
+                    qr.addData(url);
+                    qr.make();
+                    document.getElementById('qrcode').innerHTML = qr.createImgTag(3);
+                    document.getElementById('qrSection').style.display = 'block';
+                } catch (e) {
+                    addLog(`[QR] QR generation failed: ${e.message}`, 'warn');
+                }
 
                 socket.emit("broadcaster");
                 addLog("[B04] Broadcaster registered");
@@ -389,14 +419,12 @@
 
             } catch (e) {
                 addLog(`[B99] Sharing error: ${e.message}`, "error");
-                statusElement.innerText = "Error";
             }
         }
 
         // ============ 观看端逻辑 ============
         function handleWatchStream() {
             addLog("[W01] Watching stream...");
-            statusElement.innerText = "Connecting...";
 
             socket.emit("watcher");
 
@@ -424,7 +452,6 @@
             pc.ontrack = (e) => {
                 addLog("[W06] Stream received");
                 videoElement.srcObject = e.streams[0];
-                statusElement.innerText = "Playing";
 
                 // 尝试减少 jitter buffer 延迟
                 const receiver = e.receiver;
@@ -488,7 +515,7 @@
         function updateStats() {
             const pc = peerConnections["broadcaster"];
             if (!pc) {
-                statsEl.textContent = "";
+                statsEl.textContent = "v1.9";
                 setTimeout(updateStats, 1000);
                 return;
             }
@@ -530,7 +557,7 @@
                     }
                 });
 
-                statsEl.textContent = `${fps} FPS | ${resolution} | ${delay}ms`;
+                statsEl.textContent = `v1.9 | ${fps} FPS | ${resolution} | ${delay}ms`;
             }).catch(() => {});
 
             setTimeout(updateStats, 1000);
